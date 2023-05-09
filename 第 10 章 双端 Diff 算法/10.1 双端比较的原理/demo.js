@@ -70,6 +70,7 @@ function createRenderer() {
         newEndVNode = newChildren[--newEndIdx]
       } else if (oldEndVNode.key === newStartVNode.key) {
         // 新节点的头部与旧节点的尾部key相同，将旧节点尾部移动到旧节点头部
+        // 66666666
         patch(oldEndVNode, newStartVNode, container)
         insert(oldEndVNode.el, container, oldStartVNode.el)
         oldEndVNode = oldChildren[--oldEndIdx]
