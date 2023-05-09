@@ -51,7 +51,13 @@ function createRenderer() {
     let newEndVNode = newChildren[newEndIdx]
 
     while (oldStartIdx <= oldEndIdx && newStartIdx <= newEndIdx) {
-      if (oldStartVNode.key === newStartVNode.key) {
+      if (!oldStartVNode) {
+        // 旧节点已经移动复制为undefined
+        oldStartVNode = oldChildren[++oldStartIdx]
+      } else if (!oldEndVNode) {
+        // 旧节点已经移动复制为undefined
+        oldEndVNode = oldChildren[--oldEndIdx]
+      } else if (oldStartVNode.key === newStartVNode.key) {
         // 新旧节点头部key相同，DOM 不需要移动 需要打补丁
         patch(oldStartVNode, newStartVNode, container)
         oldStartVNode = oldChildren[++oldStartIdx]
@@ -74,6 +80,29 @@ function createRenderer() {
         insert(oldEndVNode.el, container, oldStartVNode.el)
         oldEndVNode = oldChildren[--oldEndIdx]
         newStartVNode = newChildren[++newStartIdx]
+      } else {
+        // 四种比较结果都不匹配，尝试从旧节点中查找与新节点key相同的节点
+        const idxInOld = oldChildren.findIndex(node => node.key === newStartVNode.key)
+        if (idxInOld > 0) {
+          // 要移动的DOM
+          const removeVNode = oldChildren[idxInOld]
+          // 打补丁
+          patch(removeVNode, newChildren, container)
+          // 移动DOM 到头部
+          insert(removeVNode.el, container, oldStartVNode.el)
+          oldChildren[idxInOld] = undefined
+          newStartVNode = newChildren[++newEndIdx]
+        } else {
+          // newStartVNode 在旧节点中不存在，挂载在头部旧节点之前
+          patch(null, newStartVNode, container, oldStartVNode.el)
+          newStartVNode = newChildren[++newStartIdx]
+        }
+      }
+    }
+    // while 循环结束后还需要查看新节点中是否有剩余
+    if (oldStartIdx> oldEndIdx && newStartIdx <= newEndIdx) {
+      for (let i = newStartIdx; i < newEndIdx; i++) {
+        patch(null, newChildren[i], container, oldStartVNode.el)
       }
     }
   }
@@ -88,68 +117,9 @@ function createRenderer() {
       setElementText(container, n2.children)
     } else if (Array.isArray(n2.children)) {
       // n1 ,n2 子节点都为数组
-      patchKeyedChildren(n1, n2, container)
       if (Array.isArray(n1.children)) {
-        //diff 算法
-        const oldChildren = n1.children
-        const newChildren = n2.children
-        // 存储寻找过程中的索引值
-        let lastIndex = 0
-
-        for (let i = 0; i < newChildren.length; i++) {
-          const newVNode = newChildren[i]
-          // 定义查找标识
-          let find = false // 初始值为false
-          // 方便find为false 时
-          let j = 0
-          // 遍历旧节点
-          for (j; j < oldChildren.length; j++) {
-            const oldVNode = oldChildren[i]
-            if (newVNode.key === oldVNode.key) {
-              // 找到可复用节点find为true
-              find = true
-              // key 值相同
-              patch(oldVNode, newVNode, container)
-              // DOM节点需要移动
-              if (j < lastIndex) {
-                // 获取新节点的前一个节点的位置
-                const preVNode = newChildren[i - 1]
-                // 如果节点存在
-                if (preVNode) {
-                  // 获取前一个节点的下一个兄弟节点
-                  const anchor = preVNode.el.nextSibling
-                  // 移动新节点
-                  insert(newVNode.el, container, anchor)
-                }
-              } else {
-                lastIndex = j
-              }
-              break
-            }
-          }
-          // 找不到可复用节点，需要挂载
-          if (!find) {
-            // 获取新节点的前一个节点
-            const preVNode = newChildren[i - 1]
-            // 定义插入锚点
-            let anchor = null
-            if (preVNode) {
-              anchor = preVNode.el.nextSibling
-            } else {
-              anchor = container.firstChild
-            }
-            patch(null, newVNode, container, anchor)
-          }
-        }
-        // 在旧节点中遍历
-        for (let i = 0; i < oldChildren.length; i++) {
-          const oldVNode = oldChildren[i]
-          const has = newChildren.find(vnode => vnode.key === oldVNode.key)
-          // 遍历时发现旧节点不存在新节点中，执行卸载操作
-          if (!has) {
-            unmount(oldVNode)
-          }
-        }
+        // 双端 diff 算法
+        patchKeyedChildren(n1, n2, container)
       } else {
         // 旧节点要么为文本要么不存在
         setElementText(container, "")
@@ -159,7 +129,7 @@ function createRenderer() {
       // 最后新节点不存在时情况
       // 旧节点为文本则清空
       if (typeof n1.children === "string") {
-        setElementText(el, "")
+        setElementText(n1.el, "")
       } else if (Array.isArray(n1.children)) {
         // 旧节点为数组则逐一卸载
         n1.children.forEach(item => unmount(item))

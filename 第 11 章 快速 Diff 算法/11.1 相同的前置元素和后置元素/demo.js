@@ -39,42 +39,28 @@ function createRenderer() {
   function patchKeyedChildren(n1, n2, container) {
     const oldChildren = n1.children
     const newChildren = n2.children
-    // 定义四个索引值
-    let oldStartIdx = 0
-    let oldEndIdx = oldChildren.length - 1
-    let newStartIdx = 0
-    let newEndIdx = newChildren.length - 1
-    // 四个节点对应的VNode
-    let oldStartVNode = oldChildren[oldStartIdx]
-    let oldEndVNode = oldChildren[oldEndIdx]
-    let newStartVNode = newChildren[newStartIdx]
-    let newEndVNode = newChildren[newEndIdx]
+    // 指向新旧节点头部
+    let j = 0
 
-    while (oldStartIdx <= oldEndIdx && newStartIdx <= newEndIdx) {
-      if (oldStartVNode.key === newStartVNode.key) {
-        // 新旧节点头部key相同，DOM 不需要移动 需要打补丁
-        patch(oldStartVNode, newStartVNode, container)
-        oldStartVNode = oldChildren[++oldStartIdx]
-        newStartVNode = newChildren[++newStartIdx]
-      } else if (oldEndVNode.key === newEndVNode.key) {
-        // 新旧均在尾部key相同，DOM 不需要移动 需要打补丁
-        patch(oldEndVNode, newEndVNode, container)
-        oldEndVNode = oldChildren[--oldEndIdx]
-        newEndVNode = newChildren[--newEndIdx]
-      } else if (oldStartVNode.key === newEndVNode.key) {
-        // 新节点尾部和旧节点头部key相同，将旧节点头部移动到旧节点尾部
-        patch(oldStartVNode, newEndVNode, container)
-        // oldEndVNode.el.nextSibling 原因：需要放在oldEndVNode 后面 所以需要获取oldEndVNode的下个兄弟节点
-        insert(oldStartVNode.el, container, oldEndVNode.el.nextSibling)
-        oldStartVNode = oldChildren[++oldStartIdx]
-        newEndVNode = newChildren[--newEndIdx]
-      } else if (oldEndVNode.key === newStartVNode.key) {
-        // 新节点的头部与旧节点的尾部key相同，将旧节点尾部移动到旧节点头部
-        patch(oldEndVNode, newStartVNode, container)
-        insert(oldEndVNode.el, container, oldStartVNode.el)
-        oldEndVNode = oldChildren[--oldEndIdx]
-        newStartVNode = newChildren[++newStartIdx]
-      }
+    let oldVNode = oldChildren[j]
+    let newVNode = newChildren[j]
+    while (oldVNode.key === newVNode.key) {
+      patch(oldVNode, newVNode, container)
+      j++
+      oldVNode = oldChildren[j]
+      newVNode = newChildren[j]
+    }
+    let oldEnd = oldChildren.length - 1
+    let newEnd = newChildren.length - 1
+
+    oldVNode = oldChildren[oldEnd]
+    newVNode = newChildren[newEnd]
+    while (oldVNode.key === newVNode.key) {
+      patch(oldVNode, newVNode, container)
+      oldEnd--
+      newEnd--
+      oldVNode = oldChildren[j]
+      newVNode = newChildren[j]
     }
   }
 
@@ -88,68 +74,11 @@ function createRenderer() {
       setElementText(container, n2.children)
     } else if (Array.isArray(n2.children)) {
       // n1 ,n2 子节点都为数组
-      patchKeyedChildren(n1, n2, container)
       if (Array.isArray(n1.children)) {
-        //diff 算法
-        const oldChildren = n1.children
-        const newChildren = n2.children
-        // 存储寻找过程中的索引值
-        let lastIndex = 0
-
-        for (let i = 0; i < newChildren.length; i++) {
-          const newVNode = newChildren[i]
-          // 定义查找标识
-          let find = false // 初始值为false
-          // 方便find为false 时
-          let j = 0
-          // 遍历旧节点
-          for (j; j < oldChildren.length; j++) {
-            const oldVNode = oldChildren[i]
-            if (newVNode.key === oldVNode.key) {
-              // 找到可复用节点find为true
-              find = true
-              // key 值相同
-              patch(oldVNode, newVNode, container)
-              // DOM节点需要移动
-              if (j < lastIndex) {
-                // 获取新节点的前一个节点的位置
-                const preVNode = newChildren[i - 1]
-                // 如果节点存在
-                if (preVNode) {
-                  // 获取前一个节点的下一个兄弟节点
-                  const anchor = preVNode.el.nextSibling
-                  // 移动新节点
-                  insert(newVNode.el, container, anchor)
-                }
-              } else {
-                lastIndex = j
-              }
-              break
-            }
-          }
-          // 找不到可复用节点，需要挂载
-          if (!find) {
-            // 获取新节点的前一个节点
-            const preVNode = newChildren[i - 1]
-            // 定义插入锚点
-            let anchor = null
-            if (preVNode) {
-              anchor = preVNode.el.nextSibling
-            } else {
-              anchor = container.firstChild
-            }
-            patch(null, newVNode, container, anchor)
-          }
-        }
-        // 在旧节点中遍历
-        for (let i = 0; i < oldChildren.length; i++) {
-          const oldVNode = oldChildren[i]
-          const has = newChildren.find(vnode => vnode.key === oldVNode.key)
-          // 遍历时发现旧节点不存在新节点中，执行卸载操作
-          if (!has) {
-            unmount(oldVNode)
-          }
-        }
+        // 简单 diff 算法
+        // 双端 diff 算法
+        // 快速 diff 算法
+        patchKeyedChildren(n1, n2, container)
       } else {
         // 旧节点要么为文本要么不存在
         setElementText(container, "")
@@ -159,7 +88,7 @@ function createRenderer() {
       // 最后新节点不存在时情况
       // 旧节点为文本则清空
       if (typeof n1.children === "string") {
-        setElementText(el, "")
+        setElementText(n1.el, "")
       } else if (Array.isArray(n1.children)) {
         // 旧节点为数组则逐一卸载
         n1.children.forEach(item => unmount(item))

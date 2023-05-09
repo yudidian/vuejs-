@@ -51,7 +51,9 @@ function createRenderer() {
     let newEndVNode = newChildren[newEndIdx]
 
     while (oldStartIdx <= oldEndIdx && newStartIdx <= newEndIdx) {
-      if (oldStartVNode.key === newStartVNode.key) {
+      if (!oldStartVNode) {
+        oldStartVNode = oldChildren[++oldStartIdx]
+      } else if (oldStartVNode.key === newStartVNode.key) {
         // 新旧节点头部key相同，DOM 不需要移动 需要打补丁
         patch(oldStartVNode, newStartVNode, container)
         oldStartVNode = oldChildren[++oldStartIdx]
@@ -74,6 +76,19 @@ function createRenderer() {
         insert(oldEndVNode.el, container, oldStartVNode.el)
         oldEndVNode = oldChildren[--oldEndIdx]
         newStartVNode = newChildren[++newStartIdx]
+      } else {
+        // 四种比较结果都不匹配，尝试从旧节点中查找与新节点key相同的节点
+        const idxInOld = oldChildren.findIndex(node => node.key === newStartVNode.key)
+        if (idxInOld > 0) {
+          // 要移动的DOM
+          const removeVNode = oldChildren[idxInOld]
+          // 打补丁
+          patch(removeVNode, newChildren, container)
+          // 移动DOM 到头部
+          insert(removeVNode.el, container, oldStartVNode.el)
+          oldChildren[idxInOld] = undefined
+          newStartVNode = newChildren[++newEndIdx]
+        }
       }
     }
   }
@@ -88,8 +103,8 @@ function createRenderer() {
       setElementText(container, n2.children)
     } else if (Array.isArray(n2.children)) {
       // n1 ,n2 子节点都为数组
-      patchKeyedChildren(n1, n2, container)
       if (Array.isArray(n1.children)) {
+        patchKeyedChildren(n1, n2, container)
         //diff 算法
         const oldChildren = n1.children
         const newChildren = n2.children
@@ -159,7 +174,7 @@ function createRenderer() {
       // 最后新节点不存在时情况
       // 旧节点为文本则清空
       if (typeof n1.children === "string") {
-        setElementText(el, "")
+        setElementText(n1.el, "")
       } else if (Array.isArray(n1.children)) {
         // 旧节点为数组则逐一卸载
         n1.children.forEach(item => unmount(item))
