@@ -36,6 +36,48 @@ function normalizeClass(value) {
 
 
 function createRenderer() {
+  function patchKeyedChildren(n1, n2, container) {
+    const oldChildren = n1.children
+    const newChildren = n2.children
+    // 定义四个索引值
+    let oldStartIdx = 0
+    let oldEndIdx = oldChildren.length - 1
+    let newStartIdx = 0
+    let newEndIdx = newChildren.length - 1
+    // 四个节点对应的VNode
+    let oldStartVNode = oldChildren[oldStartIdx]
+    let oldEndVNode = oldChildren[oldEndIdx]
+    let newStartVNode = newChildren[newStartIdx]
+    let newEndVNode = newChildren[newEndIdx]
+
+    while (oldStartIdx <= oldEndIdx && newStartIdx <= newEndIdx) {
+      if (oldStartVNode.key === newStartVNode.key) {
+        // 新旧节点头部key相同，DOM 不需要移动 需要打补丁
+        patch(oldStartVNode, newStartVNode, container)
+        oldStartVNode = oldChildren[++oldStartIdx]
+        newStartVNode = newChildren[++newStartIdx]
+      } else if (oldEndVNode.key === newEndVNode.key) {
+        // 新旧均在尾部key相同，DOM 不需要移动 需要打补丁
+        patch(oldEndVNode, newEndVNode, container)
+        oldEndVNode = oldChildren[--oldEndIdx]
+        newEndVNode = newChildren[--newEndIdx]
+      } else if (oldStartVNode.key === newEndVNode.key) {
+        // 新节点尾部和旧节点头部key相同，将旧节点头部移动到旧节点尾部
+        patch(oldStartVNode, newEndVNode, container)
+        // oldEndVNode.el.nextSibling 原因：需要放在oldEndVNode 后面 所以需要获取oldEndVNode的下个兄弟节点
+        insert(oldStartVNode.el, container, oldEndVNode.el.nextSibling)
+        oldStartVNode = oldChildren[++oldStartIdx]
+        newEndVNode = newChildren[--newEndIdx]
+      } else if (oldEndVNode.key === newStartVNode.key) {
+        // 新节点的头部与旧节点的尾部key相同，将旧节点尾部移动到旧节点头部
+        patch(oldEndVNode, newStartVNode, container)
+        insert(oldEndVNode.el, container, oldStartVNode.el)
+        oldEndVNode = oldChildren[--oldEndIdx]
+        newStartVNode = newChildren[++newStartIdx]
+      }
+    }
+  }
+
   function patchChildren(n1, n2, container) {
     // 新子节点为 普通文本时
     if (typeof n2.children === "string") {
@@ -46,6 +88,7 @@ function createRenderer() {
       setElementText(container, n2.children)
     } else if (Array.isArray(n2.children)) {
       // n1 ,n2 子节点都为数组
+      patchKeyedChildren(n1, n2, container)
       if (Array.isArray(n1.children)) {
         //diff 算法
         const oldChildren = n1.children
@@ -70,7 +113,7 @@ function createRenderer() {
               // DOM节点需要移动
               if (j < lastIndex) {
                 // 获取新节点的前一个节点的位置
-                const preVNode = newChildren[i-1]
+                const preVNode = newChildren[i - 1]
                 // 如果节点存在
                 if (preVNode) {
                   // 获取前一个节点的下一个兄弟节点
@@ -87,7 +130,7 @@ function createRenderer() {
           // 找不到可复用节点，需要挂载
           if (!find) {
             // 获取新节点的前一个节点
-            const preVNode = newChildren[i-1]
+            const preVNode = newChildren[i - 1]
             // 定义插入锚点
             let anchor = null
             if (preVNode) {
