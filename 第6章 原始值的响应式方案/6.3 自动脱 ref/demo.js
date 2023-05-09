@@ -1,5 +1,5 @@
 // 定义全局变量存储被注册的副作用函数
-import {traverse, send} from "./utils.js";
+import {traverse} from "./utils.js";
 import {TriggerType} from "./types.js";
 
 let activeEffect
@@ -329,30 +329,77 @@ function readonly(obj) {
   return createReactive(obj, false, true)
 }
 
+// 引入ref
+function ref(val) {
+  const wrapper = {
+    value: val
+  }
+  // 区别对象是由ref 或 reactive 创建
+  Object.defineProperty(wrapper, "__v_isRef", {
+    value: true,
+    writable: false, // 不可写
+    enumerable: false // 不可枚举
+  })
+  return reactive(wrapper)
+}
 
-const test = {}
-const arr = reactive([test])
+// 解决响应式数据丢失问题
+function toRef(obj, key) {
+  const wrapper = {
+    get value() {
+      return obj[key]
+    },
+    set value(val) {
+      obj[key] = val
+    }
+  }
+  Object.defineProperty(wrapper, "__v_isRef", {
+    value: true,
+    writable: false,
+    enumerable: false
+  })
+  return wrapper
+}
 
-// for of  for in 触发更新
-// effect(() => {
-//   for (const arrElement of arr) {
-//     console.log(arrElement)
-//   }
-// })
-//
-// arr[1] = 'bar'
+function toRefs(obj) {
+  const ret = {}
+  for (const key in obj) {
+    ret[key] = toRef(obj, key)
+  }
+  return ret
+}
 
-// 数组查找方法
-// effect(() => {
-//   console.log(arr.includes('foo'))
-// })
-//
-// console.log(arr.includes(test))
+// 自动脱离ref
+function proxyRefs(target) {
+  return new Proxy(target, {
+    get(target, p, receiver) {
+      const value = Reflect.get(target, p, receiver)
+      return value.__v_isRef ? value.value : value
+    },
+     set(target, p, newValue, receiver) {
+      const value = target[p]
+       if (value.__v_isRef) {
+         value.value = newValue
+         return true
+       }
+       Reflect.set(target, p, newValue, receiver)
+     }
+  })
+}
 
-// 隐式改变数组长度的方法
-effect(() => {
-  console.log(arr.push(1))
-})
-effect(() => {
-  console.log(arr.push(1))
-})
+const obj = reactive({foo: 1, bar: 2})
+obj.foo // 1
+obj.bar // 2
+
+const newObj = {...toRefs(obj)}
+// 必须使用 value 访问值
+console.log(newObj.foo.value)
+console.log(newObj.bar.value)
+
+const newTest = proxyRefs({...toRefs(obj)})
+console.log(newTest.foo)
+console.log(newTest.bar)
+
+newTest.foo = 5
+
+console.log(newTest.foo)
