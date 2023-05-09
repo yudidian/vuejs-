@@ -73,6 +73,7 @@ function createRenderer() {
         // 66666666
         // 77777777
         // 99999999
+        // 1231232312
         patch(oldEndVNode, newStartVNode, container)
         insert(oldEndVNode.el, container, oldStartVNode.el)
         oldEndVNode = oldChildren[--oldEndIdx]
