@@ -1,12 +1,62 @@
 const vueReactivity = VueReactivity;
 
-const {effect, ref} = vueReactivity
+const {effect, ref, reactive, shallowReactive} = vueReactivity
 // 文本 type
 const Text = Symbol()
 // 注释 Type
 const Comment = Symbol()
 // 片段类型
 const Fragment = Symbol()
+// 定义任务缓存队列
+const queue = new Set()
+// 定义刷新标志
+let isFlushing = false
+// 立即 resolve promise 实例
+const p = Promise.resolve()
+
+// 调度器函数
+function queueJob(job) {
+  queue.add(job)
+  if (!isFlushing) {
+    isFlushing = true
+    p.then(() => {
+      try {
+        queue.forEach(job => job())
+      } catch (e) {
+        console.error(e)
+      } finally {
+        isFlushing = false
+        queue.clear()
+      }
+    })
+  }
+}
+
+// 格式化 class 属性
+function normalizeClass(value) {
+  if (typeof value === 'string') {
+    return value
+  } else if (Array.isArray(value)) {
+    let res = ''
+    for (let i = 0; i < value.length; i++) {
+      const normalized = normalizeClass(value[i])
+      if (normalized) {
+        res += `${normalized} `
+      }
+    }
+    return res.slice(0, -1)
+  } else if (Object.prototype.toString.call(value) === "[object Object]") {
+    let res = ''
+    for (const name in value) {
+      if (value[name]) {
+        res += `${name} `
+      }
+    }
+    return res.slice(0, -1)
+  } else {
+    return ''
+  }
+}
 
 function binarySearch(arr, target) {
   let left = 0;
@@ -57,34 +107,126 @@ function findLIS(nums) {
 
   return result;
 }
-// 格式化 class 属性
-function normalizeClass(value) {
-  if (typeof value === 'string') {
-    return value
-  } else if (Array.isArray(value)) {
-    let res = ''
-    for (let i = 0; i < value.length; i++) {
-      const normalized = normalizeClass(value[i])
-      if (normalized) {
-        res += `${normalized} `
-      }
-    }
-    return res.slice(0, -1)
-  } else if (Object.prototype.toString.call(value) === "[object Object]") {
-    let res = ''
-    for (const name in value) {
-      if (value[name]) {
-        res += `${name} `
-      }
-    }
-    return res.slice(0, -1)
-  } else {
-    return ''
-  }
-}
-
 
 function createRenderer() {
+  function hasPropsChanged(preProps, nextProps) {
+    const nextKeys = Object.keys(nextProps)
+    if (nextKeys.length !== Object.keys(preProps).length) {
+      return true
+    }
+    for (const key in nextProps) {
+      if (preProps[key] !== nextKeys[key]) {
+        return  true
+      }
+    }
+    return false
+  }
+  // 遍历组件传递的props
+  function resolveProps(options, propsData) {
+    // options  render函数中的props vnode.type.props
+    // propsData 是vnode.props定义的，一般是数据类型
+    const props = {}
+    const attrs = {}
+    for (const key in propsData) {
+      // 正常定义的 <Count title="xxx">
+      if (key in options) {
+        props[key] = propsData[key]
+      } else {
+        attrs[key] = propsData[key]
+      }
+    }
+    return [props, attrs]
+  }
+  // 组件补丁
+  function patchComponent(n1, n2, anchor) {
+    //  新组件的component 指向旧组件的component
+    const instance = (n2.component = n1.component)
+    // 获取当前props
+    const {props} = instance
+    if (hasPropsChanged(n1.props, n2.props)) {
+      const [nextProps] = resolveProps(n2.type.props, n2.props)
+      // 更新原props
+      for (const key in nextProps) {
+        props[key] = nextProps[key]
+      }
+
+      // 删除不在nextProps中的值
+      for (const key in props) {
+        if (!(key in nextProps)) {
+          delete props[key]
+        }
+      }
+    }
+  }
+
+  // 组件挂载
+  function mountComponent(vnode, container, anchor) {
+    const componentOptions = vnode.type
+    const {render, data, beforeCreate, created, beforeMount, mounted, beforeUpdate, updated, props: propsOptions} = componentOptions
+    // 挂载之前函数执行
+    beforeCreate && beforeCreate()
+    // 包装data为响应式数据
+    const state = reactive(data())
+    const [props, attrs] = resolveProps(propsOptions, vnode.props)
+    // 定义组件自身状态数据
+    const instance = {
+      state, // 组件自身状态
+      props: shallowReactive(props),
+      isMounted: false, // 是否被挂载
+      subTree: null // 渲染内容
+    }
+    vnode.component = instance
+    // 创建上下文对象
+    const renderContext = new Proxy(instance, {
+      // 获取state 或者props 值
+      get(target, p, receiver) {
+        const { state, props} = target
+        if (state && key in state) {
+          return state[key]
+        } else if (props && key in props) {
+          return props[key]
+        } else {
+          console.error("not find")
+        }
+      },
+      set(target, p, value, receiver) {
+        const {state, props} = target
+        if (state && p in state) {
+          state[p] = value
+        } else if (props && p in props) {
+          console.warn(`Attempting to mutate prop "${p}". Props are readonly.`)
+        } else {
+          console.error("not exit")
+        }
+      }
+    })
+    // 响应式数据挂载完成
+    created && created.call(renderContext)
+    effect(() => {
+      // 改变this 指向 使其在render 函数中能访问到state中的数据
+      const subTree = render.call(state, state)
+      // 检查组件是否被挂载
+      if (!instance.isMounted) {
+        // 挂载之前
+        beforeMount && beforeMount()
+        patch(null, subTree, container, anchor)
+        // 下次执行时不会触发更新操作
+        instance.isMounted = true
+        // 挂载完成
+        mounted && mounted()
+      } else {
+        // 更新之前
+        beforeUpdate && beforeUpdate()
+        patch(instance.subTree, subTree, container, anchor)
+        // 更新之后
+        updated && updated()
+      }
+      instance.subTree = subTree
+    }, {
+      scheduler: queueJob
+    })
+  }
+
   function patchKeyedChildren(n1, n2, container) {
     const oldChildren = n1.children
     const newChildren = n2.children
@@ -108,20 +250,92 @@ function createRenderer() {
       patch(oldVNode, newVNode, container)
       oldEnd--
       newEnd--
-      oldVNode = oldChildren[j]
-      newVNode = newChildren[j]
+      oldVNode = oldChildren[oldEnd]
+      newVNode = newChildren[newEnd]
     }
     // 预处理结束
     if (oldEnd < j && newEnd >= j) {
       const anchorIndex = newEnd + 1
-
       const anchor = anchorIndex < newChildren.length ? newChildren[anchorIndex].el : null
       while (j <= newEnd) {
         patch(null, newChildren[j++], container, anchor)
       }
     } else if (newEnd < j && oldEnd >= j) {
-      while (j<= oldEnd) {
+      while (j <= oldEnd) {
         unmount(oldChildren[j++])
+      }
+    } else {
+      // 未处理的个数
+      const count = newEnd - j + 1
+      const source = new Array(count).fill(-1)
+      const newStart = j
+      const oldStart = j
+      // 是否需要移动标识
+      let moved = false
+      let pos = 0
+      // 构建索引表
+      const keyIndex = {}
+      for (let i = newStart; i <= newEnd; i++) {
+        keyIndex[newChildren[i].key] = i
+      }
+      // 新增 patched 变量，代表更新过的节点数量
+      let patched = 0
+      // 旧节点遍历
+      for (let i = oldStart; i < oldEnd; i++) {
+        oldVNode = oldChildren[i]
+        if (patched <= count) {
+          const k = keyIndex[oldVNode.key]
+          if (k !== undefined) {
+            newVNode = newChildren[k]
+            patch(oldVNode, newVNode, container)
+            patched++
+            source[k - newStart] = i
+            if (k < pos) {
+              moved = true
+            } else {
+              pos = k
+            }
+          } else {
+            // 新节点在旧节点中找不到对应的key，则卸载旧节点
+            unmount(oldVNode)
+          }
+        } else {
+          unmount(oldVNode)
+        }
+      }
+      //移动DOM
+      if (moved) {
+        // 计算最长递增子序列,返回是索引值
+        const seq = findLIS(source)
+        // s指向最长递增子序列最后一个元素
+        let s = seq.length - 1
+        // i 指向新节点的最后一个子元素
+        let i = count - 1
+        for (i; i >= 0; i--) {
+          // 新节点需要挂载
+          if (source[i] === -1) {
+            // 节点在newChildren 中的真实位置
+            const pos = i + newStart
+            const newVNode = newChildren[pos]
+            // 下一个节点位置
+            const nextPos = pos + 1
+            // 定义锚点
+            const anchor = nextPos < newChildren.length ? newChildren[nextPos].el : null
+            patch(null, newVNode, container, anchor)
+          } else if (i !== seq[s]) {
+            // 节点需要移动
+            // 节点在newChildren 中的真实位置
+            const pos = i + newStart
+            const newVNode = newChildren[pos]
+            // 下一个节点位置
+            const nextPos = pos + 1
+            // 定义锚点
+            const anchor = nextPos < newChildren.length ? newChildren[nextPos].el : null
+            insert(newVNode.el, container, anchor)
+          } else {
+            s--
+          }
+        }
       }
     }
   }
@@ -330,6 +544,14 @@ function createRenderer() {
       } else {
         patchChildren(n1, n2, container)
       }
+    } else if (typeof type === "object") {
+      if (!n1) {
+        // 挂载组件
+        mountComponent(n2, container, anchor)
+      } else {
+        // 组件打补丁
+        patchComponent(n1, n2, container)
+      }
     }
   }
 
@@ -366,27 +588,18 @@ function createRenderer() {
 }
 
 const renderer = createRenderer()
-const oldVNode = {
-  type: 'div',
-  children: [
-    {type: 'p', children: '1', key: 1},
-    {type: 'p', children: '2', key: 2},
-    {type: 'p', children: 'hello', key: 3}
-  ]
+const MyComponent = {
+  name: 'MyComponent',
+  // 用 data 函数来定义组件自身的状态
+  data() {
+    return {
+      foo: 'hello world'
+    }
+  },
+  render() {
+    return {
+      type: 'div',
+      children: `foo 的值是: ${this.foo}` // 在渲染函数内使用组件状态
+    }
+  }
 }
-
-const newVNode = {
-  type: 'div',
-  children: [
-    {type: 'p', children: 'world', key: 3},
-    {type: 'p', children: '1', key: 1},
-    {type: 'p', children: '2', key: 2}
-  ]
-}
-
-// 首次挂载
-renderer.render(oldVNode, document.querySelector('#app'))
-setTimeout(() => {
-  // 1 秒钟后更新
-  renderer.render(newVNode, document.querySelector('#app'))
-}, 1000);

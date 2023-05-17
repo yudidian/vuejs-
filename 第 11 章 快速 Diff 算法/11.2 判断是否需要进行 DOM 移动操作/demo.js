@@ -8,6 +8,32 @@ const Comment = Symbol()
 // 片段类型
 const Fragment = Symbol()
 
+// 格式化 class 属性
+function normalizeClass(value) {
+  if (typeof value === 'string') {
+    return value
+  } else if (Array.isArray(value)) {
+    let res = ''
+    for (let i = 0; i < value.length; i++) {
+      const normalized = normalizeClass(value[i])
+      if (normalized) {
+        res += `${normalized} `
+      }
+    }
+    return res.slice(0, -1)
+  } else if (Object.prototype.toString.call(value) === "[object Object]") {
+    let res = ''
+    for (const name in value) {
+      if (value[name]) {
+        res += `${name} `
+      }
+    }
+    return res.slice(0, -1)
+  } else {
+    return ''
+  }
+}
+
 function binarySearch(arr, target) {
   let left = 0;
   let right = arr.length - 1;
@@ -57,32 +83,6 @@ function findLIS(nums) {
 
   return result;
 }
-// 格式化 class 属性
-function normalizeClass(value) {
-  if (typeof value === 'string') {
-    return value
-  } else if (Array.isArray(value)) {
-    let res = ''
-    for (let i = 0; i < value.length; i++) {
-      const normalized = normalizeClass(value[i])
-      if (normalized) {
-        res += `${normalized} `
-      }
-    }
-    return res.slice(0, -1)
-  } else if (Object.prototype.toString.call(value) === "[object Object]") {
-    let res = ''
-    for (const name in value) {
-      if (value[name]) {
-        res += `${name} `
-      }
-    }
-    return res.slice(0, -1)
-  } else {
-    return ''
-  }
-}
-
 
 function createRenderer() {
   function patchKeyedChildren(n1, n2, container) {
@@ -108,20 +108,92 @@ function createRenderer() {
       patch(oldVNode, newVNode, container)
       oldEnd--
       newEnd--
-      oldVNode = oldChildren[j]
-      newVNode = newChildren[j]
+      oldVNode = oldChildren[oldEnd]
+      newVNode = newChildren[newEnd]
     }
     // 预处理结束
     if (oldEnd < j && newEnd >= j) {
       const anchorIndex = newEnd + 1
-
       const anchor = anchorIndex < newChildren.length ? newChildren[anchorIndex].el : null
       while (j <= newEnd) {
         patch(null, newChildren[j++], container, anchor)
       }
     } else if (newEnd < j && oldEnd >= j) {
-      while (j<= oldEnd) {
+      while (j <= oldEnd) {
         unmount(oldChildren[j++])
+      }
+    } else {
+      // 未处理的个数
+      const count = newEnd - j + 1
+      const source = new Array(count).fill(-1)
+      const newStart = j
+      const oldStart = j
+      // 是否需要移动标识
+      let moved = false
+      let pos = 0
+      // 构建索引表
+      const keyIndex = {}
+      for (let i = newStart; i <= newEnd; i++) {
+        keyIndex[newChildren[i].key] = i
+      }
+      // 新增 patched 变量，代表更新过的节点数量
+      let patched = 0
+      // 旧节点遍历
+      for (let i = oldStart; i < oldEnd; i++) {
+        oldVNode = oldChildren[i]
+        if (patched <= count) {
+          const k = keyIndex[oldVNode.key]
+          if (k !== undefined) {
+            newVNode = newChildren[k]
+            patch(oldVNode, newVNode, container)
+            patched++
+            source[k - newStart] = i
+            if (k < pos) {
+              moved = true
+            } else {
+              pos = k
+            }
+          } else {
+            // 新节点在旧节点中找不到对应的key，则卸载旧节点
+            unmount(oldVNode)
+          }
+        } else {
+          unmount(oldVNode)
+        }
+      }
+      //移动DOM
+      if (moved) {
+        // 计算最长递增子序列,返回是索引值
+        const seq = findLIS(source)
+        // s指向最长递增子序列最后一个元素
+        let s = seq.length - 1
+        // i 指向新节点的最后一个子元素
+        let i = count - 1
+        for (i; i >= 0; i--) {
+          // 新节点需要挂载
+          if (source[i] === -1) {
+            // 节点在newChildren 中的真实位置
+            const pos = i + newStart
+            const newVNode = newChildren[pos]
+            // 下一个节点位置
+            const nextPos = pos + 1
+            // 定义锚点
+            const anchor = nextPos < newChildren.length ? newChildren[nextPos].el : null
+            patch(null, newVNode, container, anchor)
+          } else if (i !== seq[s]) {
+            // 节点需要移动
+            // 节点在newChildren 中的真实位置
+            const pos = i + newStart
+            const newVNode = newChildren[pos]
+            // 下一个节点位置
+            const nextPos = pos + 1
+            // 定义锚点
+            const anchor = nextPos < newChildren.length ? newChildren[nextPos].el : null
+            insert(newVNode.el, container, anchor)
+          } else {
+            s--
+          }
+        }
       }
     }
   }

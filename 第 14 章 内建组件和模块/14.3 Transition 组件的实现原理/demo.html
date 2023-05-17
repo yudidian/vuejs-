@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Title</title>
+</head>
+<script src="../../reactivity.global.js"></script>
+<!--<script src="demo.js" type="module"></script>-->
+<script src="test.js" type="module"></script>
+<style>
+    .box {
+        width: 100px;
+        height: 100px;
+        background-color: red;
+    }
+
+    .enter-form {
+        transform: translateX(200px);
+    }
+
+    .enter-to {
+        transform: translateX(0);
+    }
+
+    .enter-active {
+        transition: transform 1s ease-in-out;
+    }
+
+    /* 初始状态 */
+    .leave-from {
+        transform: translateX(0);
+    }
+
+    /* 结束状态 */
+    .leave-to {
+        transform: translateX(200px);
+    }
+
+    /* 过渡过程 */
+    .leave-active {
+        transition: transform 2s ease-out;
+    }
+
+</style>
+<body>
+<div id="app"></div>
+</body>
+</html>
