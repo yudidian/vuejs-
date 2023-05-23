@@ -108,6 +108,7 @@ function tokenize(str) {
 
 function parse(str) {
   const tokens = tokenize(str)
+  console.dir(tokens)
   // 根节点
   const root = {
     type: 'Root',
@@ -190,16 +191,52 @@ function traverseNode(ast, context) {
     exitFns[i]()
   }
 }
+
+function transformRoot(node) {
+  return () => {
+    if (node.type !== 'Root') {
+      return
+    }
+    const vnodeJSAST = node.children[0].jsNode
+
+    node.jsNode = {
+      type: 'FunctionDecl',
+      id: {
+        type: 'Identifier',
+        name: 'render'
+      },
+      params: [],
+      body: [
+        {
+          type: 'ReturnStatement',
+          return: vnodeJSAST
+        }
+      ]
+    }
+  }
+}
+
 function transformElement(node) {
-  if (node.type === 'Element' && node.tag === 'p') {
-    node.tag = 'h1'
+  return () => {
+    if (node.type !== 'Element') {
+      return
+    }
+    const callExp = createCallExpression('h', [createStringLiteral(node.tag)])
+    node.children.length === 1
+        ? callExp.arguments.push(node.children[0].jsNode)
+        : callExp.arguments.push(createArrayExpression(node.children.map(c => c.jsNode)))
+    node.jsNode = callExp
   }
 }
-function transformText(node, context) {
-  if (node.type === 'Text') {
-    context.removeNode()
+
+function transformText(node) {
+  // 只处理文本节点
+  if (node.type !== 'Text') {
+    return
   }
+  node.jsNode = createStringLiteral(node.content)
 }
+
 function transform(ast) {
   const context = {
     currentNode: null, // 当前转化节点
@@ -207,7 +244,8 @@ function transform(ast) {
     parent: null, // 当前转化节点的父节点
     nodeTransforms: [
       transformElement,
-      transformText
+      transformText,
+      transformRoot
     ],
     // 替换节点
     replaceNode(node) {
@@ -222,37 +260,144 @@ function transform(ast) {
     }
   }
   traverseNode(ast, context)
-  dump(ast)
+  // dump(ast)
 }
-const FunctionDeclNode = {
-  type: 'FunctionDecl',
-  id: {
+
+function createStringLiteral(value) {
+  return {
+    type: 'StringLiteral',
+    value
+  }
+}
+
+function createIdentifier(name) {
+  return {
     type: 'Identifier',
-    name: 'render'
-  },
-  params: [],
-  body: [
-    {
-      type: 'ReturnStatement',
-      return: null
+    name
+  }
+}
+
+function createArrayExpression(elements) {
+  return {
+    type: 'ArrayExpression',
+    elements
+  }
+}
+
+function createCallExpression(callee, arguments) {
+  return {
+    type: 'CallExpression',
+    callee: createIdentifier(callee),
+    arguments
+  }
+}
+
+function genNodeList(nodes, context) {
+  const {push} = context
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i]
+    genNode(node, context)
+    if (i < nodes.length - 1) {
+      push(',')
     }
-  ]
+  }
 }
-const CallExp = {
-  type: 'CallExpression',
-  callee: {
-    type: 'Identifier',
-    name: 'h'
-  },
-  arguments: []
+
+function genFunctionDecl(node, context) {
+  const {push, indent, deIndent} = context
+  push(`function ${node.id.name}`)
+  push('(')
+  genNodeList(node.params, context)
+  push(')')
+  push('{')
+  indent()
+  node.body.forEach(n => genNode(n, context))
+  deIndent()
+  push('}')
 }
-const Str = {
-  type: 'StringLiteral',
-  value: 'div'
+
+function genArrayExpression(node, context) {
+  const {push} = context
+  push('[')
+  genNodeList(node.elements, context)
+  push(']')
 }
-const Arr = {
-  type: 'ArrayExpression',
-  elements: []
+
+function genReturnStatement(node, context) {
+  const {push} = context
+  push(`return `)
+  genNode(node.return, context)
 }
-const ast = parse(`<div><p>Vue</p><p>Template</p></div>`)
-transform(ast)
+
+function genStringLiteral(node, context) {
+  const {push} = context
+  push(`'${node.value}'`)
+}
+
+function genCallExpression(node, context) {
+  const {push} = context
+  const {callee, arguments: args} = node
+  push(`${callee.name}(`)
+  genNodeList(args, context)
+  push(')')
+}
+
+function genNode(node, context) {
+  switch (node.type) {
+    case 'FunctionDecl': {
+      genFunctionDecl(node, context)
+      break
+    }
+    case 'ReturnStatement': {
+      genReturnStatement(node, context)
+      break
+    }
+    case 'CallExpression': {
+      genCallExpression(node, context)
+      break
+    }
+    case 'StringLiteral': {
+      genStringLiteral(node, context)
+      break
+    }
+    case 'ArrayExpression': {
+      genArrayExpression(node, context)
+      break
+    }
+  }
+}
+
+function generate(node) {
+  const context = {
+    code: '',
+    push(code) {
+      context.code += code
+    },
+    currentIndent: 0,
+    newline() {
+      context.code += '\n' + `  `.repeat(context.currentIndent)
+    },
+    // 设置缩进
+    indent() {
+      context.currentIndent++
+      context.newline()
+    },
+    // 取消缩进
+    deIndent() {
+      context.currentIndent--
+      context.newline()
+    }
+  }
+  genNode(node, context)
+  return context.code
+}
+
+function compile(template) {
+  const ast = parse(template)
+  console.log(ast)
+  transform(ast)
+  return generate(ast.jsNode)
+}
+
+const ast = compile(`<div><p>Vue</p><p>Template</p></div>`)
+console.dir(ast)
